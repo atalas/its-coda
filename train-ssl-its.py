@@ -103,15 +103,7 @@ def TrainingLoop(md):
 
 	print(f"Total Loops: {md.totalLoops}")
 
-	# Conservative value for RF because dataset only has 60 samples.
-	rf = RandomForestClassifier(
-		n_estimators=100,
-		max_depth=20,
-		min_samples_split=5,   # Require more samples to split
-		min_samples_leaf=2,    # Avoid tiny leaves
-		random_state=42,
-		class_weight="balanced" # If classes are imbalanced
-	)
+
 
 	# initialize pseudo labels.
 	# This is only needed if augmentation requires it
@@ -121,12 +113,13 @@ def TrainingLoop(md):
 	md.X = md.X_unlabeled			# functions generic
 
 	# The Teacher - train on the labeled data
-	rf.fit(md.X_labeled, md.y_labeled)
 
 	# We can test the augmentation before the loop
-	# md = augmentations.compositionalCutmix(md)
-	# md.y_pred = rf.predict(md.X_test)
-	# return rf
+	#outputArray(md.X, "%.4e")
+	#augmentations.aitchisonPerturbation(md)
+	#outputArray(md.X_augmented, "%.4e")
+	#md.y_pred = rf.predict(md.X_test)
+	#return rf
 
 	# initialize the combined arrays
 	X_combined = md.X_labeled
@@ -137,20 +130,29 @@ def TrainingLoop(md):
 	print("00 - X_combined size:" + str(X_combined.shape[0]));
 
 	for loop in range(md.totalLoops):
-		# Weak Augmentation (for pseudo-labeling)
 		# We only want to slightly perturb the data	
-		augmentations.augmentTabular0(md, noise_std=md.noise)
+		augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
+
+		rf = RandomForestClassifier(
+			warm_start=True,
+			n_estimators=100,
+			max_depth=60,
+			min_samples_split=5,   # Require more samples to split
+			min_samples_leaf=2,    # Avoid tiny leaves
+			random_state=42
+			#class_weight="balanced" # If classes are imbalanced
+		)
+		rf.fit(X_combined, y_combined)
+
 
 		# DEBUG: Output the augmented data to a tsv file 
 		# np.savetxt('output.tsv', md.X_augmented, delimiter='\t', fmt='%.8e')
 
 		# Predict on unlabeled data
 		pseudo_unlab = rf.predict_proba(md.X_augmented)
-		
-		# outputArray(pseudo_unlab)
 
 		# Convert probability predictions into class labels
-		md.y = np.argmax(pseudo_unlab, axis=1)
+		md.y_augmented = np.argmax(pseudo_unlab, axis=1)
 	
 		confidences = np.max(pseudo_unlab, axis=1)
 		md.percent_confident = np.append(
@@ -162,9 +164,11 @@ def TrainingLoop(md):
 
 		print("\tConfidences shape:" + str(confidences.shape[0]))
 		print("\tIndexes shape:" + str(indexes.shape[0]))
-		# Use strongly augmented data for training
-		X_pseudo = md.X[indexes]
-		y_pseudo = md.y[indexes]
+		# Use augmented data for training
+		#X_pseudo = md.X[indexes]
+		#y_pseudo = md.y[indexes]
+		X_pseudo = md.X_augmented[indexes]
+		y_pseudo = md.y_augmented[indexes]
 
 		#if(loop == (md.totalLoops - 1)):
 			#print (mask)
@@ -175,14 +179,10 @@ def TrainingLoop(md):
 		print("\t" + str(loop) + " - X_combined size:" + str(X_combined.shape[0]));
 		md.xcombined_shape = np.append(md.xcombined_shape, X_combined.shape[0])
 
-		# Train on combined data
-		rf.fit(X_combined, y_combined)
-
 		# Decay tau over time 
 		# md.tau_per_loop = np.append(md.tau_per_loop, md.tau)
 		# md.tau = max(0.7, md.tau - 0.002)
 		# md.tau = md.tau - .002
-
 	
 		md.y_pred = rf.predict(md.X_test)
 		# Keep track of accuracies for plotting
@@ -233,7 +233,7 @@ def createDebugPlot(md):
 		(md.totalLoops if md.totalLoops < 20 else md.totalLoops / 10)))
 	# Save the plot to an image file
 	now = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-	plt.savefig("rf-T" + str(md.tau) + "-N" + str(md.noise) + "GROWTH-" + now + ".png", dpi=300, bbox_inches='tight')
+	plt.savefig("rf-T" + str(md.tau) + "-N" + str(md.noise) + "-growth-" + now + ".png", dpi=300, bbox_inches='tight')
 
 
 def displayMetrics(md):
@@ -284,7 +284,7 @@ def rfFeatureImportance(md, classifier):
 def outputArray(arr, fmtstr='%d'):
 	now = datetime.now().strftime("%Y-%m-%d-%H%M%S")
 	np.savetxt(now + ".tsv", arr, delimiter='\t', fmt=fmtstr)
-	time.sleep(1)
+	time.sleep(2)
 
 def printTime(msg):
 	starttime = datetime.now().strftime("%Y-%m-%d-%H%M%S")
@@ -308,7 +308,7 @@ def main():
     
 	md.tau = .95
 	md.noise = 0.1
-	md.totalLoops = 20
+	md.totalLoops = 12
 	rf = TrainingLoop(md)
 	createPlot(md)
 	createDebugPlot(md)
