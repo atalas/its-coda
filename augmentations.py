@@ -1,5 +1,24 @@
 import numpy as np
 
+def aitchisonPerturbation(md, noise_scale=0.01, noise_type='uniform'):
+	"""
+	Apply Aitchison perturbations to CLR-transformed data.
+
+	Args:
+		data: numpy array (n_samples, n_features)
+		noise_scale: max absolute perturbation magnitude
+		noise_type: 'uniform' or 'laplace'
+	Returns:
+		perturbed data (same shape)
+	"""
+	if noise_type == 'uniform':
+		noise = np.random.uniform(-noise_scale, noise_scale, md.X.shape)
+	elif noise_type == 'laplace':
+		noise = np.random.laplace(0, noise_scale, md.X.shape)
+	else:
+		raise ValueError("noise_type must be 'uniform' or 'laplace'")
+
+	md.X_augmented = md.X + noise
 
 def augmentTabular(md, y=None, noise_std=0.1):
 	md.X_augmented = md.X
