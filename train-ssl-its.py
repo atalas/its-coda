@@ -11,8 +11,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report 
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import seaborn as sns
+from sklearn.linear_model import SGDClassifier
 from datetime import datetime
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 import augmentations
@@ -96,56 +97,74 @@ def preprocess(md):
 
 
 
-def trainingloop(md):
+def trainingLoop(md):
 	md.name = "randomforest"
-    scaler = StandardScaler()
-    md.X_labeled = scaler.fit_transform(md.X_labeled)
-    md.X_unlabeled = scaler.transform(md.X_unlabeled)
-    md.X_test = scaler.transform(md.X_test)
+	scaler = StandardScaler()
+	md.X_labeled = scaler.fit_transform(md.X_labeled)
+	md.X_unlabeled = scaler.transform(md.X_unlabeled)
+	md.X_test = scaler.transform(md.X_test)
 
-    # Initialise incremental model
-    clf = SGDClassifier(loss='log', max_iter=1, warm_start=True,
-                        class_weight='balanced', random_state=42)
+	# Initialise incremental model
+	clf = SGDClassifier(loss='log_loss', max_iter=1, warm_start=True, random_state=42)
 
-    # Fit once on the initial labeled set
-    clf.partial_fit(md.X_labeled, md.y_labeled, classes=np.unique(md.y_labeled))
+	# Fit once on the initial labeled set
+	clf.partial_fit(md.X_labeled, md.y_labeled, classes=np.unique(md.y_labeled))
 
-    for loop in range(md.totalLoops):
-		augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
+	# Keeping this generic for augmentation functions
+	md.X = md.X_unlabeled
 
-        # Predict pseudo‑labels
-        probs = clf.predict_proba(md.X_augmented)
-        confidences = probs.max(axis=1)
-        md.y_augmented = probs.argmax(axis=1)
+	# initialize the combined arrays
+	X_combined = md.X_labeled
+	y_combined = md.y_labeled 
 
-        # Filter high‑confidence predictions ----
-        mask = confidences >= tau
-        X_pseudo = md.X_augmented[mask]
-        y_pseudo = md.y_augmented[mask]
+	# Debug
+	md.xcombined_shape = np.append(md.xcombined_shape, X_combined.shape[0])
+	print("00 - X_combined size:" + str(X_combined.shape[0]));
 
-        if len(X_pseudo) == 0:
-            print(f"Iteration {i}: no new high‑confidence samples.")
-            continue
+	for loop in range(md.totalLoops):
+		#augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
+		augmentations.augmentTabular1(md, noise_std=md.noise)
 
-        # Update the model with pseudo‑labels ----
-        clf.partial_fit(X_pseudo, y_pseudo)
+		# Predict on unlabeled data
+		pseudo_unlab = clf.predict_proba(md.X_augmented)
 
-        # Evaluate ----
-        md.y_pred = clf.predict(md.X_test)
-        acc = accuracy_score(md.y_test, md.y_pred)
-        print(f"Iteration {i:02d}  |  # new pseudo: {len(X_pseudo):4d}  |  Test acc: {acc:.4f}")
+		# Convert probability predictions into class labels
+		md.y_augmented = np.argmax(pseudo_unlab, axis=1)
+	
+		confidences = np.max(pseudo_unlab, axis=1)
+		md.percent_confident = np.append(
+			md.percent_confident, np.mean(confidences >= md.tau)) # * 100 
 
-    return clf
+		# Filter high-confidence pseudo-labels
+		mask = confidences >= md.tau
+		indexes = np.where(mask)[0]  # Returns array of indexes
 
+		print("\tConfidences shape:" + str(confidences.shape[0]))
+		print("\tIndexes shape:" + str(indexes.shape[0]))
 
+		# Use augmented data for training
+		X_pseudo = md.X_augmented[indexes]
+		y_pseudo = md.y_augmented[indexes]
 
+		if len(X_pseudo) == 0:
+			print(f"Loop {loop}: no new high‑confidence samples.")
+			continue
+
+		# Update the model with pseudo‑labels ----
+		clf.partial_fit(X_pseudo, y_pseudo)
+
+		# Evaluate ----
+		md.y_pred = clf.predict(md.X_test)
+		acc = accuracy_score(md.y_test, md.y_pred)
+
+		md.acc_per_loop = np.append(md.acc_per_loop, acc)
+		print(f"\tLoop: {loop} \t Accuracy: {acc:.4f}")
+
+	return clf
 
 
 #@profile
-def TrainingLoop(md):
-	#md.tau = .80
-	#md.noise = .001
-	#md.totalLoops = 10
+def trainingLoop2(md):
 	md.name = "randomforest"
 
 	print(f"Total Loops: {md.totalLoops}")
@@ -248,7 +267,6 @@ def createPlot(md):
 
 	plt.clf()
 	plt.plot(md.acc_per_loop,   "g-", linewidth=1, label="Accuracy")
-	# plt.plot(md.tau_per_loop,	"y-", linewidth=1, label="Tau")
 	plt.plot(md.percent_confident, "y-", linewidth=1,
 		label="Percent Confident")
 	
@@ -356,7 +374,7 @@ def main():
 	md.tau = .95
 	md.noise = 0.1
 	md.totalLoops = 12
-	rf = TrainingLoop(md)
+	rf = trainingLoop(md)
 	createPlot(md)
 	createDebugPlot(md)
 
