@@ -96,7 +96,7 @@ def preprocess(md):
 		   	random_state=42, stratify=y_train_full)
 
 
-
+#@profile
 def trainingLoop(md):
 	md.name = "SDGClassifier"
 	scaler = StandardScaler()
@@ -122,9 +122,11 @@ def trainingLoop(md):
 	md.X = md.X_unlabeled[~used]
 
 	for loop in range(md.totalLoops):
-		#augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
-		augmentations.augmentTabular1(md, noise_std=md.noise)
+		augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
+		#augmentations.augmentTabular1(md, noise_std=md.noise)
 		md.X_augmented = scaler.transform(md.X_augmented)
+		print(f"X-unlab size: {md.X_unlabeled.shape}")
+		print(f"X-aug size: {md.X_augmented.shape}")
 
 		# Predict on unlabeled data
 		pseudo_unlab = clf.predict_proba(md.X_augmented)
@@ -140,23 +142,22 @@ def trainingLoop(md):
 		mask = confidences >= md.tau
 		print("\tConfidences size:" + str(confidences.shape[0]))
 
-		mask = conf >= tau
 		if not mask.any():
 			print(f"Loop {loop}: no confident samples, stopping.")
 			break
 
 		#indexes = np.where(mask)[0]  # Returns array of indexes
-		indexes = np.where(~used)[0][mask]  # Returns array of indexes
+		indexes = np.where(~used)[0]  # Returns array of indexes
 		print("\tIndexes size:" + str(indexes.shape[0]))
 		used[indexes] = True
 
 
-		X_labeled = np.concatenate([X_l, X_aug[mask]])
-		y_labeled = np.concatenate([md.y_labeled, y_aug[mask]])
+		md.X_labeled = np.concatenate([md.X_labeled, md.X_augmented[mask]])
+		md.y_labeled = np.concatenate([md.y_labeled, md.y_augmented[mask]])
 
 
 		# Update the model with pseudo‑labels ----
-		clf.partial_fit(X_augmented[mask], y_augmented[mask], classes=class_list)
+		clf.partial_fit(md.X_augmented[mask], md.y_augmented[mask], classes=class_list)
 
 		# Evaluate ----
 		md.y_pred = clf.predict(md.X_test)
@@ -166,105 +167,6 @@ def trainingLoop(md):
 		print(f"\tLoop: {loop} \t Accuracy: {acc:.4f}")
 
 	return clf
-
-
-#@profile
-def trainingLoop2(md):
-	md.name = "randomforest"
-
-	print(f"Total Loops: {md.totalLoops}")
-
-
-
-	# initialize pseudo labels.
-	# This is only needed if augmentation requires it
-	# pseudo_labels = np.zeros(len(md.X_unlabeled), dtype=int)
-	# md.y_unlabeled = pseudo_labels
-	# md.y = md.y_unlabeled			# X & y references keep augmentation
-	md.X = md.X_unlabeled			# functions generic
-
-	# The Teacher - train on the labeled data
-
-	# We can test the augmentation before the loop
-	#outputArray(md.X, "%.4e")
-	#augmentations.aitchisonPerturbation(md)
-	#outputArray(md.X_augmented, "%.4e")
-	#md.y_pred = rf.predict(md.X_test)
-	#return rf
-
-	# initialize the combined arrays
-	X_combined = md.X_labeled
-	y_combined = md.y_labeled 
-
-	# Debug
-	md.xcombined_shape = np.append(md.xcombined_shape, X_combined.shape[0])
-	print("00 - X_combined size:" + str(X_combined.shape[0]));
-
-	for loop in range(md.totalLoops):
-		# We only want to slightly perturb the data	
-		augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
-
-		rf = RandomForestClassifier(
-			warm_start=True,
-			n_estimators=100,
-			max_depth=60,
-			min_samples_split=5,   # Require more samples to split
-			min_samples_leaf=2,    # Avoid tiny leaves
-			random_state=42
-			#class_weight="balanced" # If classes are imbalanced
-		)
-		rf.fit(X_combined, y_combined)
-
-
-		# DEBUG: Output the augmented data to a tsv file 
-		# np.savetxt('output.tsv', md.X_augmented, delimiter='\t', fmt='%.8e')
-
-		# Predict on unlabeled data
-		pseudo_unlab = rf.predict_proba(md.X_augmented)
-
-		# Convert probability predictions into class labels
-		md.y_augmented = np.argmax(pseudo_unlab, axis=1)
-	
-		confidences = np.max(pseudo_unlab, axis=1)
-		md.percent_confident = np.append(
-			md.percent_confident, np.mean(confidences >= md.tau)) # * 100 
-
-		# Filter high-confidence pseudo-labels
-		mask = confidences >= md.tau
-		indexes = np.where(mask)[0]  # Returns array of indexes
-
-		print("\tConfidences shape:" + str(confidences.shape[0]))
-		print("\tIndexes shape:" + str(indexes.shape[0]))
-		# Use augmented data for training
-		#X_pseudo = md.X[indexes]
-		#y_pseudo = md.y[indexes]
-		X_pseudo = md.X_augmented[indexes]
-		y_pseudo = md.y_augmented[indexes]
-
-		#if(loop == (md.totalLoops - 1)):
-			#print (mask)
-
-		# Combine labeled + pseudo-labeled data
-		X_combined = np.vstack([X_combined, X_pseudo])
-		y_combined = np.concatenate([y_combined, y_pseudo])
-		print("\t" + str(loop) + " - X_combined size:" + str(X_combined.shape[0]));
-		md.xcombined_shape = np.append(md.xcombined_shape, X_combined.shape[0])
-
-		# Decay tau over time 
-		# md.tau_per_loop = np.append(md.tau_per_loop, md.tau)
-		# md.tau = max(0.7, md.tau - 0.002)
-		# md.tau = md.tau - .002
-	
-		md.y_pred = rf.predict(md.X_test)
-		# Keep track of accuracies for plotting
-		acc = accuracy_score(md.y_test, md.y_pred);
-		md.acc_per_loop = np.append(md.acc_per_loop, acc)
-		print(f"\tLoop: {loop} \t Accuracy: {acc:.4f}")
-
-	# md.y_pred = rf.predict(md.X_test)
-	outputArray(md.acc_per_loop)
-	outputArray(md.xcombined_shape)
-	return rf
 
 
 def createPlot(md):
@@ -378,7 +280,7 @@ def main():
     
 	md.tau = .95
 	md.noise = 0.1
-	md.totalLoops = 12
+	md.totalLoops = 20
 	rf = trainingLoop(md)
 	createPlot(md)
 	createDebugPlot(md)
