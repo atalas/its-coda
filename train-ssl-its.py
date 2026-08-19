@@ -98,32 +98,33 @@ def preprocess(md):
 
 
 def trainingLoop(md):
-	md.name = "randomforest"
+	md.name = "SDGClassifier"
 	scaler = StandardScaler()
 	md.X_labeled = scaler.fit_transform(md.X_labeled)
 	md.X_unlabeled = scaler.transform(md.X_unlabeled)
 	md.X_test = scaler.transform(md.X_test)
 
 	# Initialise incremental model
-	clf = SGDClassifier(loss='log_loss', max_iter=1, warm_start=True, random_state=42)
+	clf = SGDClassifier(loss='log_loss', max_iter=10, warm_start=True, 
+		learning_rate='optimal', random_state=42)
+
+	# classes must be the *full* list from the start
+	class_list = np.unique(md.y_labeled)
 
 	# Fit once on the initial labeled set
-	clf.partial_fit(md.X_labeled, md.y_labeled, classes=np.unique(md.y_labeled))
+	clf.partial_fit(md.X_labeled, md.y_labeled, classes=class_list)
 
 	# Keeping this generic for augmentation functions
-	md.X = md.X_unlabeled
+	# md.X = md.X_unlabeled
 
-	# initialize the combined arrays
-	X_combined = md.X_labeled
-	y_combined = md.y_labeled 
-
-	# Debug
-	md.xcombined_shape = np.append(md.xcombined_shape, X_combined.shape[0])
-	print("00 - X_combined size:" + str(X_combined.shape[0]));
+	# Keep a list of indices of samples that have been “used”
+	used = np.zeros(len(md.X_unlabeled), dtype=bool)
+	md.X = md.X_unlabeled[~used]
 
 	for loop in range(md.totalLoops):
 		#augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
 		augmentations.augmentTabular1(md, noise_std=md.noise)
+		md.X_augmented = scaler.transform(md.X_augmented)
 
 		# Predict on unlabeled data
 		pseudo_unlab = clf.predict_proba(md.X_augmented)
@@ -137,21 +138,25 @@ def trainingLoop(md):
 
 		# Filter high-confidence pseudo-labels
 		mask = confidences >= md.tau
-		indexes = np.where(mask)[0]  # Returns array of indexes
+		print("\tConfidences size:" + str(confidences.shape[0]))
 
-		print("\tConfidences shape:" + str(confidences.shape[0]))
-		print("\tIndexes shape:" + str(indexes.shape[0]))
+		mask = conf >= tau
+		if not mask.any():
+			print(f"Loop {loop}: no confident samples, stopping.")
+			break
 
-		# Use augmented data for training
-		X_pseudo = md.X_augmented[indexes]
-		y_pseudo = md.y_augmented[indexes]
+		#indexes = np.where(mask)[0]  # Returns array of indexes
+		indexes = np.where(~used)[0][mask]  # Returns array of indexes
+		print("\tIndexes size:" + str(indexes.shape[0]))
+		used[indexes] = True
 
-		if len(X_pseudo) == 0:
-			print(f"Loop {loop}: no new high‑confidence samples.")
-			continue
+
+		X_labeled = np.concatenate([X_l, X_aug[mask]])
+		y_labeled = np.concatenate([md.y_labeled, y_aug[mask]])
+
 
 		# Update the model with pseudo‑labels ----
-		clf.partial_fit(X_pseudo, y_pseudo)
+		clf.partial_fit(X_augmented[mask], y_augmented[mask], classes=class_list)
 
 		# Evaluate ----
 		md.y_pred = clf.predict(md.X_test)
