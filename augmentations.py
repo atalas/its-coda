@@ -1,6 +1,6 @@
 import numpy as np
 
-def aitchisonPerturbation(md, noise_scale=0.01, noise_type='uniform'):
+def aitchisonPerturbation(md, noise_scale=0.1, noise_type='uniform'):
 	"""
 	Apply Aitchison perturbations to CLR-transformed data.
 
@@ -20,7 +20,7 @@ def aitchisonPerturbation(md, noise_scale=0.01, noise_type='uniform'):
 
 	md.X_augmented = md.X + noise
 
-def augmentTabular(md, y=None, noise_std=0.1):
+def augmentPassthru(md, y=None, noise_std=0.1):
 	md.X_augmented = md.X
 
 def augmentTabular1(md, y=None, noise_std=0.1):

@@ -11,6 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report 
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.utils.class_weight import compute_class_weight
 from sklearn.linear_model import SGDClassifier
 from datetime import datetime
 import seaborn as sns
@@ -101,7 +102,10 @@ def trainingLoop(md):
 	md.name = "SDGClassifier"
 	scaler = StandardScaler()
 	md.X_labeled = scaler.fit_transform(md.X_labeled)
-	md.X_unlabeled = scaler.transform(md.X_unlabeled)
+
+	# Try to augment first and then transform
+	#md.X_unlabeled = scaler.transform(md.X_unlabeled)
+	
 	md.X_test = scaler.transform(md.X_test)
 
 	# Initialise incremental model
@@ -111,8 +115,16 @@ def trainingLoop(md):
 	# classes must be the *full* list from the start
 	class_list = np.unique(md.y_labeled)
 
+	# Compute weights once (on labeled data)
+	weights = compute_class_weight('balanced', classes=classes, y=md.y_labeled)
+	class_weights = dict(zip(classes, weights))
+
 	# Fit once on the initial labeled set
 	clf.partial_fit(md.X_labeled, md.y_labeled, classes=class_list)
+
+	md.y_pred = clf.predict(md.X_test)
+	acc = accuracy_score(md.y_test, md.y_pred)
+	print(f"*Base Accuracy*: {acc:.4f}")
 
 	# Keeping this generic for augmentation functions
 	# md.X = md.X_unlabeled
@@ -120,46 +132,51 @@ def trainingLoop(md):
 	# Keep a list of indices of samples that have been “used”
 	used = np.zeros(len(md.X_unlabeled), dtype=bool)
 	md.X = md.X_unlabeled[~used]
+	print(f"X size: {md.X.shape}")
 
 	for loop in range(md.totalLoops):
-		augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
+		#augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
 		#augmentations.augmentTabular1(md, noise_std=md.noise)
+		augmentations.augmentPassthru(md, noise_std=md.noise)
 		md.X_augmented = scaler.transform(md.X_augmented)
 		print(f"X-unlab size: {md.X_unlabeled.shape}")
 		print(f"X-aug size: {md.X_augmented.shape}")
 
-		# Predict on unlabeled data
+		# Predict on unlabeled data. predict_prob rows sum to 1
 		pseudo_unlab = clf.predict_proba(md.X_augmented)
 
 		# Convert probability predictions into class labels
 		md.y_augmented = np.argmax(pseudo_unlab, axis=1)
-	
+
 		confidences = np.max(pseudo_unlab, axis=1)
 		md.percent_confident = np.append(
 			md.percent_confident, np.mean(confidences >= md.tau)) # * 100 
 
+		outputArray(confidences, "conf", "%.3f")
+
 		# Filter high-confidence pseudo-labels
 		mask = confidences >= md.tau
-		print("\tConfidences size:" + str(confidences.shape[0]))
+		print("\tHigh conf size:" + str(mask.shape[0]))
+		print("\tHigh conf %:" + str(md.percent_confident))
+
+		outputArray(mask, "mask", "%.3f")
 
 		if not mask.any():
 			print(f"Loop {loop}: no confident samples, stopping.")
 			break
 
 		#indexes = np.where(mask)[0]  # Returns array of indexes
-		indexes = np.where(~used)[0]  # Returns array of indexes
-		print("\tIndexes size:" + str(indexes.shape[0]))
+		indexes = np.where(mask)[0]  # Returns array of indexes
+		print("\t size:" + str(indexes.shape[0]))
 		used[indexes] = True
-
 
 		md.X_labeled = np.concatenate([md.X_labeled, md.X_augmented[mask]])
 		md.y_labeled = np.concatenate([md.y_labeled, md.y_augmented[mask]])
 
-
 		# Update the model with pseudo‑labels ----
 		clf.partial_fit(md.X_augmented[mask], md.y_augmented[mask], classes=class_list)
 
-		# Evaluate ----
+		# Evaluate 
 		md.y_pred = clf.predict(md.X_test)
 		acc = accuracy_score(md.y_test, md.y_pred)
 
@@ -253,9 +270,9 @@ def rfFeatureImportance(md, classifier):
 	starttime = datetime.now().strftime("%Y-%m-%d-%H%M%S")
 	plt.savefig(md.name + ".featimp." + starttime + ".png", dpi=300, bbox_inches='tight')
 
-def outputArray(arr, fmtstr='%d'):
+def outputArray(arr, filename, fmtstr='%d'):
 	now = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-	np.savetxt(now + ".tsv", arr, delimiter='\t', fmt=fmtstr)
+	np.savetxt(filename + "-" + now + ".tsv", arr, delimiter='\t', fmt=fmtstr)
 	time.sleep(2)
 
 def printTime(msg):
@@ -280,10 +297,10 @@ def main():
     
 	md.tau = .95
 	md.noise = 0.1
-	md.totalLoops = 20
+	md.totalLoops = 1
 	rf = trainingLoop(md)
-	createPlot(md)
-	createDebugPlot(md)
+	#createPlot(md)
+	#createDebugPlot(md)
 
 	# rfFeatureImportance(md, rf)
 	# displayMetrics(md)
