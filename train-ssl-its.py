@@ -44,6 +44,7 @@ class ModelData:
 	tau_per_loop:	 np.ndarray
 	min_confidence:  np.ndarray
 	percent_confident: np.ndarray
+	class_list:		 np.ndarray
 	noise: float
 	tau: float
 	name: str
@@ -80,6 +81,9 @@ def preprocess(md):
 	md.percent_confident = np.array([])
 	md.xcombined_shape = np.array([])
 
+	# classes must be the *full* list from the start
+	md.class_list = np.unique(md.labels)
+
 	# Split into train/test sets 
 	# First split: 80% data, 20% test (unlabeled)
 	X_train_full, md.X_test, y_train_full, md.y_test = train_test_split(
@@ -95,6 +99,10 @@ def preprocess(md):
 	md.X_labeled, md.X_unlabeled, md.y_labeled, _ = train_test_split(
 			X_train_full, y_train_full, test_size=0.5,
 		   	random_state=42, stratify=y_train_full)
+
+def batch_weights(y_batch, class_list):
+    weights = compute_class_weight('balanced', classes=class_list, y=y_batch)
+    return np.array([dict(zip(class_list, weights))[y] for y in y_batch])
 
 
 #@profile
@@ -112,32 +120,22 @@ def trainingLoop(md):
 	clf = SGDClassifier(loss='log_loss', max_iter=10, warm_start=True, 
 		learning_rate='optimal', random_state=42)
 
-	# classes must be the *full* list from the start
-	class_list = np.unique(md.y_labeled)
-
-	# Compute weights once (on labeled data)
-	weights = compute_class_weight('balanced', classes=classes, y=md.y_labeled)
-	class_weights = dict(zip(classes, weights))
-
 	# Fit once on the initial labeled set
-	clf.partial_fit(md.X_labeled, md.y_labeled, classes=class_list)
+	clf.partial_fit(md.X_labeled, md.y_labeled, classes=md.class_list)
 
 	md.y_pred = clf.predict(md.X_test)
 	acc = accuracy_score(md.y_test, md.y_pred)
 	print(f"*Base Accuracy*: {acc:.4f}")
 
-	# Keeping this generic for augmentation functions
-	# md.X = md.X_unlabeled
-
 	# Keep a list of indices of samples that have been “used”
 	used = np.zeros(len(md.X_unlabeled), dtype=bool)
-	md.X = md.X_unlabeled[~used]
-	print(f"X size: {md.X.shape}")
-
 	for loop in range(md.totalLoops):
+		md.X = md.X_unlabeled[~used]
+		print(f"X size: {md.X.shape}")
+
 		#augmentations.aitchisonPerturbation(md, noise_scale=md.noise)
-		#augmentations.augmentTabular1(md, noise_std=md.noise)
-		augmentations.augmentPassthru(md, noise_std=md.noise)
+		augmentations.augmentTabular1(md, noise_std=md.noise)
+		#augmentations.augmentPassthru(md, noise_std=md.noise)
 		md.X_augmented = scaler.transform(md.X_augmented)
 		print(f"X-unlab size: {md.X_unlabeled.shape}")
 		print(f"X-aug size: {md.X_augmented.shape}")
@@ -152,20 +150,15 @@ def trainingLoop(md):
 		md.percent_confident = np.append(
 			md.percent_confident, np.mean(confidences >= md.tau)) # * 100 
 
-		outputArray(confidences, "conf", "%.3f")
-
 		# Filter high-confidence pseudo-labels
 		mask = confidences >= md.tau
 		print("\tHigh conf size:" + str(mask.shape[0]))
 		print("\tHigh conf %:" + str(md.percent_confident))
 
-		outputArray(mask, "mask", "%.3f")
-
 		if not mask.any():
 			print(f"Loop {loop}: no confident samples, stopping.")
 			break
 
-		#indexes = np.where(mask)[0]  # Returns array of indexes
 		indexes = np.where(mask)[0]  # Returns array of indexes
 		print("\t size:" + str(indexes.shape[0]))
 		used[indexes] = True
@@ -173,8 +166,9 @@ def trainingLoop(md):
 		md.X_labeled = np.concatenate([md.X_labeled, md.X_augmented[mask]])
 		md.y_labeled = np.concatenate([md.y_labeled, md.y_augmented[mask]])
 
-		# Update the model with pseudo‑labels ----
-		clf.partial_fit(md.X_augmented[mask], md.y_augmented[mask], classes=class_list)
+		# Update the model with pseudo‑labels
+		sample_weights = batch_weights(md.y_labeled, md.class_list)
+		clf.partial_fit(md.X_augmented[mask], md.y_augmented[mask], classes=md.class_list, sample_weight=sample_weights)
 
 		# Evaluate 
 		md.y_pred = clf.predict(md.X_test)
@@ -297,7 +291,7 @@ def main():
     
 	md.tau = .95
 	md.noise = 0.1
-	md.totalLoops = 1
+	md.totalLoops = 14
 	rf = trainingLoop(md)
 	#createPlot(md)
 	#createDebugPlot(md)
