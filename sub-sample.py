@@ -6,7 +6,7 @@ import pandas as pd
 import random
 import sys
 import os
-
+import datetime
 
 def stratify_samples_by_count(dataframe, count: int):
 	class_column = dataframe.columns[0]
@@ -59,19 +59,25 @@ def stratify_samples_by_percent (dataframe, ratio: float = 0.1):
 	# Combine all sampled groups into a single DataFrame
 	return pd.concat(sampled_data_list).reset_index(drop=True)
 
+def randomize(df):
+	return df.sample(frac=1)
+
 
 def main():
 	if len(sys.argv) > 1:
+		now = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
 		infile = sys.argv[1]
-		outfile = infile + ".output"
+		outfile = infile + "-" + now + ".csv"
+		
 		df = pd.read_csv(infile)
 
 		if df.empty:
 			print("Error in CSV file: it is empty.")
 			return
 
-		#df_out = stratify_samples_by_percent(df, ratio = .1);
+		# df_out = stratify_samples_by_percent(df, ratio = .05);
 		df_out = stratify_samples_by_count(df, count = 10);
+		df_out = randomize(df_out)
 		df_out.to_csv(outfile, index=False)
 
 
