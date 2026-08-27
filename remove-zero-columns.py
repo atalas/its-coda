@@ -17,7 +17,7 @@ def remove_zero_columns(input_csv, output_csv):
 
 	# Save the cleaned data to a new CSV file
 	df_cleaned.to_csv(output_csv, index=False)
-	print(f"Columns with all zeros removed. Result saved to {output_csv}")
+	print(f"Columns with all zeros removed: ({len(zero_columns)}). Result saved to {output_csv}")
 
 def main():
 	if len(sys.argv) > 1:

@@ -126,7 +126,7 @@ def TrainingLoop(md):
 	# We can test the augmentation before the loop
 	# md = augmentations.compositionalCutmix(md)
 	# md.y_pred = rf.predict(md.X_test)
-	# return rf
+	return rf
 
 	# initialize the combined arrays
 	X_combined = md.X_labeled
@@ -139,7 +139,7 @@ def TrainingLoop(md):
 	for loop in range(md.totalLoops):
 		# Weak Augmentation (for pseudo-labeling)
 		# We only want to slightly perturb the data	
-		augmentations.augmentTabular0(md, noise_std=md.noise)
+		# augmentations.augmentTabular0(md, noise_std=md.noise)
 
 		# DEBUG: Output the augmented data to a tsv file 
 		# np.savetxt('output.tsv', md.X_augmented, delimiter='\t', fmt='%.8e')
@@ -313,7 +313,7 @@ def main():
 	createPlot(md)
 	createDebugPlot(md)
 
-	# rfFeatureImportance(md, rf)
+	rfFeatureImportance(md, rf)
 	# displayMetrics(md)
 	#printTime("Random Forest End")
 
