@@ -80,19 +80,28 @@ def preprocess(md):
 
 	# Split into train/test sets 
 	# First split: 80% data, 20% test (unlabeled)
-	X_train_full, md.X_test, y_train_full, md.y_test = train_test_split(
+	#X_train_full, md.X_test, y_train_full, md.y_test = train_test_split(
+	#		md.features, md.labels,
+	#		test_size=0.2,
+	#	   	random_state=42, stratify=md.labels
+	#)
+
+	# Split into train/test sets 
+	# First split: 80% data, 20% test (unlabeled)
+	md.X_labeled, md.X_test, md.y_labeled, md.y_test = train_test_split(
 			md.features, md.labels,
 			test_size=0.2,
 		   	random_state=42, stratify=md.labels
 	)
 
+
 	# We can delete this data, it is no longer needed
 	del md.features, md.labels
 
 	# Second split: 50% train, 50% unlabeled
-	md.X_labeled, md.X_unlabeled, md.y_labeled, _ = train_test_split(
-			X_train_full, y_train_full, test_size=0.5,
-		   	random_state=42, stratify=y_train_full)
+	#md.X_labeled, md.X_unlabeled, md.y_labeled, _ = train_test_split(
+	#		X_train_full, y_train_full, test_size=0.5,
+	#	   	random_state=42, stratify=y_train_full)
 
 #@profile
 def TrainingLoop(md):
@@ -106,7 +115,7 @@ def TrainingLoop(md):
 	# Conservative value for RF because dataset only has 60 samples.
 	rf = RandomForestClassifier(
 		n_estimators=100,
-		max_depth=20,
+		max_depth=60,
 		min_samples_split=5,   # Require more samples to split
 		min_samples_leaf=2,    # Avoid tiny leaves
 		random_state=42,
@@ -118,14 +127,18 @@ def TrainingLoop(md):
 	# pseudo_labels = np.zeros(len(md.X_unlabeled), dtype=int)
 	# md.y_unlabeled = pseudo_labels
 	# md.y = md.y_unlabeled			# X & y references keep augmentation
-	md.X = md.X_unlabeled			# functions generic
+	# md.X = md.X_unlabeled			# functions generic
+	# md.X = md.X_labeled
 
 	# The Teacher - train on the labeled data
 	rf.fit(md.X_labeled, md.y_labeled)
 
 	# We can test the augmentation before the loop
 	# md = augmentations.compositionalCutmix(md)
-	# md.y_pred = rf.predict(md.X_test)
+	md.y_pred = rf.predict(md.X_test)
+	# Keep track of accuracies for plotting
+	acc = accuracy_score(md.y_test, md.y_pred);
+	print(f"\t Accuracy: {acc:.4f}")
 	return rf
 
 	# initialize the combined arrays
@@ -139,7 +152,7 @@ def TrainingLoop(md):
 	for loop in range(md.totalLoops):
 		# Weak Augmentation (for pseudo-labeling)
 		# We only want to slightly perturb the data	
-		# augmentations.augmentTabular0(md, noise_std=md.noise)
+		augmentations.aitchisonPerturbation(md, noise_std=md.noise)
 
 		# DEBUG: Output the augmented data to a tsv file 
 		# np.savetxt('output.tsv', md.X_augmented, delimiter='\t', fmt='%.8e')
@@ -191,8 +204,8 @@ def TrainingLoop(md):
 		print(f"\tLoop: {loop} \t Accuracy: {acc:.4f}")
 
 	# md.y_pred = rf.predict(md.X_test)
-	outputArray(md.acc_per_loop)
-	outputArray(md.xcombined_shape)
+	#outputArray(md.acc_per_loop)
+	#outputArray(md.xcombined_shape)
 	return rf
 
 
@@ -308,7 +321,7 @@ def main():
     
 	md.tau = .95
 	md.noise = 0.1
-	md.totalLoops = 20
+	md.totalLoops = 16
 	rf = TrainingLoop(md)
 	createPlot(md)
 	createDebugPlot(md)
